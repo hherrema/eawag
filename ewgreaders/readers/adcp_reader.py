@@ -4,23 +4,25 @@
 import dolfyn as dlfn
 import xarray as xr
 import numpy as np
+import json
+
+from .mooring_reader import MooringReader
 
 
-class ADCPReader():
-    MD_PATHS = ['Q:/Messdaten/Aphys_hypothesis_data/{lake}/{year}/Mooring/{location}/{date}/{date}_{location}_meta.tsv',
-                'Q:/Messdaten/Aphys_hypothesis_data/{lake}/{year}/Mooring/{location}/{date}/Notes.txt',
-                'Q:/Messdaten/Aphys_hypothesis_data/{lake}/{year}/Mooring/{date}/{date}_{location}_meta.tsv']
+class ADCPReader(MooringReader):
 
-    def __init__(self, lake, location, year, date, bathy_file, datalakes=False):
+    def __init__(self, serial_id, lake, location, year, date, bathy_file, datalakes=False):
         """
         Initialize ADCPReader object.
 
         Parameters
         ----------
+        serial_id : str
+            Serial number of ADCP.
         lake : str
             Lake where ADCP is deployed.
         location : str
-            Location code witin lake of ADCP deployment.
+            Location code within lake of ADCP deployment.
         year : str
             Year of ADCP retrieval.
         date : str
@@ -30,38 +32,51 @@ class ADCPReader():
         datalakes : bool
             Toggle whether to read from Eawag drive or DataLakes.
         """
-        self.bathy_file = bathy_file
-        self.datalakes = datalakes
+        super.__init__(lake, location, year, date, bathy_file, datalakes)
+        self.serial_id = serial_id
 
 
-    def locate_md_file(self):
+    def get_mab(self):
         """
-        Locate metadata file.
-        """
+        Parse metadata file for meters above bottom of ADCP.
 
-
-
-    def parse_metadata(self):
+        Returns
+        -------
+        mab : float
+            Meters above bottom for ADCP.
         """
-        Parse metadata file.
-        """
-        raise NotImplementedError
+        with open(self.md_file, 'r') as f:
+            md = json.load(f)
+
+        instruments = md['instruments']
+        for i in instruments:
+            if i['serial_id'] == self.serial_id and i['instrument'] == 'adcp':
+                return i['mab']
+            
+        return np.nan
     
 
-    def set_total_depth(self, total_depth=None):
+    def get_orientation(self):
         """
-        Set depth of lake at position of ADCP.
+        Parse metadata file for orientation of ADCP.
 
-        Parameters
-        ----------
-        total_depth : float
-            Depth of lake at ADCP position, calculated manually.
+        Returns
+        -------
+        orientation : str
+            Orientation {up, down} of ADCP.
         """
-        if not total_depth:
-            bathy = xr.open_dataset(self.bathy_file)
-            total_depth = bathy.sel(xsc=self.xsc, ysc=self.ysc).depth.item()
+        with open(self.md_file, 'r') as f:
+            md = json.load(f)
 
-        return total_depth
+        instruments = md['instruments']
+        for i in instruments:
+            if i['serial_id'] == self.serial_id and i['instrument'] == 'adcp':
+                if "up" in i['comments']:
+                    return "up"
+                elif "down" in i['comments']:
+                    return "down"
+        
+        return None
 
 
     def load_from_L0(self):
@@ -76,14 +91,9 @@ class ADCPReader():
         return dlfn.read(self.fpath)
     
 
-    def set_depth(self, depth=None):
+    def set_depth(self):
         """
         Set depth of ADCP.  Use ADCP's depth if ADCP measures pressure.
-
-        Parameters
-        ----------
-        depth : float
-            Depth below water surface of ADCP, calculated manually.
         
         Returns
         -------
@@ -92,25 +102,17 @@ class ADCPReader():
         """
         if 'pressure' in self.ds.data_vars:
             depth = self.ds.depth.where(self.ds.depth != 0, drop=True).mean().item()
-        elif not depth:
-            raise ValueError('ADCP does not measure pressure, must provide manual depth argument.')
-        
+        else:
+            depth = self.total_depth - self.mab
+
         return depth
     
 
-    def range_to_depth(self, orientation=None):
+    def range_to_depth(self):
         """
         Convert ADCP range values to depths.
-
-        Parameters
-        ----------
-        orientation : str
-            'up' for upwards looking ADCP, 'down' for downwards looking ADCP.
         """
-        if orientation and orientation not in ['up', 'down']:
-            raise ValueError('If specifying orient, must be "up" or "down".')
-        
-        if not orientation:
+        if not self.orientation:
             orientation = self.ds.attrs['orientation']
 
         if orientation == 'up':
@@ -119,6 +121,8 @@ class ADCPReader():
             self.ds['range'] = self.depth + self.ds.range.values
 
 
+    # ---------- Quality Assurance ---------- #
+
     def qa_interface_surface(self):
         """
         Filter data impacted by lake surface.
@@ -126,6 +130,7 @@ class ADCPReader():
         dist_sidelobe = self.depth * (1 - np.cos(self.ds.attrs['beam_angle'] * np.pi / 180))
 
         return self.ds.where(self.ds.range >= dist_sidelobe, drop=True)
+    
     
     def qa_interface_bottom(self):
         """
@@ -210,7 +215,7 @@ class ADCPReader():
         return self.ds.where(pitch & roll)
         
     
-    def qa_corr_stdev(self, stdev_thresh=0.01):  # threshold may be too harsh (test not from manual)
+    def qa_corr_stdev(self, stdev_thresh=0.01, scale=100):  # threshold may be too harsh (test not from manual)
         """
         Filter data with standard deviation of 4 beams' correlations > 0.01.
         
@@ -218,11 +223,13 @@ class ADCPReader():
         ----------
         stdev_thresh : float
             Threshold for maximum standard deviation.
+        scale : int
+            Scale correlations to [0, 1]
         """
-        corr1 = self.ds.corr.sel(beam=1) / 100        # scale correlations to [0, 1]
-        corr2 = self.ds.corr.sel(beam=2) / 100
-        corr3 = self.ds.corr.sel(beam=3) / 100
-        corr4 = self.ds.corr.sel(beam=4) / 100
+        corr1 = self.ds.corr.sel(beam=1) / scale
+        corr2 = self.ds.corr.sel(beam=2) / scale
+        corr3 = self.ds.corr.sel(beam=3) / scale
+        corr4 = self.ds.corr.sel(beam=4) / scale
         corr = xr.concat([corr1, corr2, corr3, corr4], dim='beam')
         corr_stdev = corr.std(dim='beam')
 
