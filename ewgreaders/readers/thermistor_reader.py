@@ -12,7 +12,7 @@ from .mooring_reader import MooringReader
 
 class ThermistorReader(MooringReader):
     THERMISTORS = ['rbr_temp', 'rbr_duet']
-    COLS_MAP_RBR_TEMP = {'timestamp': 'time', 'temperature': 'temp'}
+    COLS_MAP = {'timestamp': 'time', 'temperature': 'temp'}
 
     def __init__(self, serial_id, lake, location, year, date, bathy_file, datalakes=False):
         """
@@ -101,17 +101,17 @@ class ThermistorReader(MooringReader):
         ds : xr.Dataset
             Dataset of data recorded by thermistor.
         """
-        if self.sensor == 'rbr_temp':
+        if self.sensor in  ['rbr_temp', 'rbr_duet']:
             with rsk.RSK(self.fpath) as f:
                 f.readdata()
                 data = pd.DataFrame(f.data)
 
-            data = data.rename(columns=self.COLS_MAP_RBR_TEMP)
+            data = data.rename(columns=self.COLS_MAP)
             data = data.set_index('time')
 
             ds = xr.Dataset.from_dataframe(data)
             ds = ds.assign_coords(depth=self.depth, serial_id=self.serial_id)
         else:
-            raise NotImplementedError
+            raise NotImplementedError("Only rbr_temp and rbr_duet sensors are handled.")
         
         return ds

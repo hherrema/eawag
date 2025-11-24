@@ -4,20 +4,22 @@
 import xarray as xr
 import numpy as np
 import pandas as pd
+import pyrsktools as rsk
 import json
 
 from .mooring_reader import MooringReader
 
 
 class O2Reader(MooringReader):
-    OXYGEN_LOGGERS = ['minidot', 'rbr_do', 'rbr_duet']
+    OXYGEN_LOGGERS = ['minidot', 'rbr_do']
     COLS_DROP_MINIDOT = ['Unix Timestamp', 'Coordinated Universal Time', 'Battery', 'Q']
     COLS_MAP_MINIDOT = {
         'UTC_Date_&_Time': 'time', 
         'Temperature': 'temp', 
-        'Dissolved Oxygen': 'd_oxygen', 
+        'Dissolved Oxygen': 'd_oxygen_conc', 
         'Dissolved Oxygen Saturation': 'd_oxygen_sat'
     }
+    COLS_MAP_RBR_DO = {'timestamp': 'time', 'dissolved_o2_saturation': 'd_oxygen_sat'}
     
     def __init__(self, serial_id, lake, location, year, date, bathy_file, datalakes=False):
         """
@@ -123,11 +125,17 @@ class O2Reader(MooringReader):
             data['temp'] = data['temp'].astype(float)
             data['d_oxygen'] = data['d_oxygen'].astype(float)
             data['d_oxygen_sat'] = data['d_oxygen_sat'].astype(float)
-            data = data.set_index('time')
+        elif self.sensor == 'rbr_do':
+            with rsk.RSK(self.fpath) as f:
+                f.readdata()
+                data = pd.DataFrame(f.data)
 
-            ds = xr.Dataset.from_dataframe(data)
-            ds = ds.assign_coords(depth=self.depth, serial_id=self.serial_id)
+            data = data.rename(columns=self.COLS_MAP_RBR_DO)
         else:
-            raise NotImplementedError
+            raise NotImplementedError("Only minidot and rbr_do sensors are handled.")
+        
+        data = data.set_index('time')
+        ds = xr.Dataset.from_dataframe(data)
+        ds = ds.assign_coords(depth=self.depth, serial_id=self.serial_id)
 
         return ds

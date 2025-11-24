@@ -159,19 +159,20 @@ class MooringReader:
         raise NotImplementedError("Subclasses must implement method.")
     
 
-    def create_oxygen_logger_chain(self, datasets):
+    def create_instrument_chain(self, datasets):
         """
-        Concatenate oxygen logger data into single Dataset with all oxygen loggers.
+        Concatenate individual instrument data into single Dataset with all instruments.
+        Works for thermistors and oxygen loggers.
 
         Parameters
         ----------
         datasets : list
-            List of xarray Datasets from individual oxygen loggers.
+            List of xarray Datasets from individual instruments.
 
         Returns
         -------
         ds : xr.Dataset
-            Dataset of data recorded by all oxygen loggers on mooring.
+            Dataset of data recorded by all instruments on mooring.
         """
         # align time samples
         ds_aligned = xr.align(*datasets, join='inner')
