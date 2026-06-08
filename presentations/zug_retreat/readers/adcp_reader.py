@@ -1,0 +1,68 @@
+### Class for reading ADCP data
+
+# imports
+import xarray as xr
+import os
+
+class ADCPReader():
+    root = 'Q:/Messdaten/Aphys_Hypothesis_data'
+    DPATH_L2 = '{root}/{lake}/{year}/Mooring/{date}/{location}/L2/'
+
+    def __init__(self, lake, date, location, serial_id):
+        """
+        Initialize ADCPReader object.
+
+        Parameters
+        ----------
+        lake : str
+            Lake where ADCP is deployed.
+        date : str
+            Date (YYYY-MM-DD) of ADCP retrieval.
+        location : str
+            Location code within lake of ADCP deployment.
+        serial_id : str
+            Serial number of ADCP.
+        """
+        self.lake = lake
+        self.year = str(date.year)
+        self.date = date.strftime('%Y%m%d')
+        self.location = location
+        self.serial_id = serial_id
+
+
+    # ---------- Navigation ----------
+
+    def locate_file_L2(self):
+        """
+        Locate file with processed (L2) ADCP data.
+        
+        Returns
+        -------
+        fpath_L2 : str
+            Path to L2 data file.
+        """
+        dpath_L2 = self.DPATH_L2.format(root=self.root, lake=self.lake, year=self.year, date=self.date, location=self.location)
+        fpath_L2 = f'{dpath_L2}/adcp_{self.serial_id}_L2.nc'
+
+        if not os.path.exists(fpath_L2):
+            raise FileNotFoundError('Could not locate L2 file.')
+        
+        return fpath_L2
+    
+
+    # ---------- Reading ----------
+    
+    def load(self):
+        """
+        Load processed (L2) ADCP data.
+
+        Returns
+        -------
+        ds : xr.Dataset
+            ADCP data.
+        """
+        fpath_L2 = self.locate_file_L2()
+
+        ds = xr.open_dataset()
+
+        return ds.load()
